@@ -6,6 +6,13 @@ a flutter library to make HTTP requests (inspired by python [requests](https://g
 ### Cookies, huh?
 Server side cookies (via response header `SET-COOKIE`) are stored using the assistance of `shared_preferences`. Stored cookies will be send seamlessly on the next http requests you make to the same domain (simple implementation, similar to a web browser)
 
+## About this fork
+I created this fork for a project of mine as I came across two major problems of the original code:
+  1. Cookies sent together with a redirect HTTP response (e.g. 303) were ignored
+  2. Cookies using flags instead of keyword arguments ('HttpOnly' instead of 'HttpOnly=true' were not correctly parsed)
+Both problems are fixed in this fork.
+
+This fork provides a few more options ('followRedirect', 'maxRedirects' and 'client' for a custom HttpClient) and has a slightly changed API usage (see below) to clean up library code.
 
 ## Install
 
@@ -51,9 +58,7 @@ just like in python's request module, the `Response` object has this functionall
 - `body` - a raw string to be used as the request's body
 - `bodyEncoding` - default `RequestBodyEncoding.FormURLEncoded`. will set the `content-type` header
 - `headers` - `Map<String, String>` of custom client headers to add in the request
-- `timeoutSeconds` - default `10` seconds. after that period of time without server response an exception is thrown
-- `persistCookies` - default `true`. if should respect server's command to persist cookie
-- `verify` - default `true`. if the SSL verification enabled
+- `options` - an instance of RequestOptions (shorthand: `O`)
 
 > 💡 Only one optional argument can be used in a single request `body` or `json`
  
@@ -83,6 +88,22 @@ var r = await Requests.post(
 r.raiseForStatus();
 dynamic json = r.json();
 print(json['id']);
+```
+
+---
+
+HTTP GET with some options:
+
+```dart
+var r = await Requests.get(
+  "https://example.com",
+  options: O(
+    followRedirect: false,  // do not follow redirect responses (301, 302, 303, ...)
+    verifySSL: false,       // ignore invalid SSL certificates (renamed from the original `verify`)
+    persistCookies: false,  // do not keep cookies
+    timeoutSeconds: 20      // timeout, obviously
+  ));
+  r.raiseForStatus();
 ```
 
 ---
