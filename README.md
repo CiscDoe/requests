@@ -10,6 +10,7 @@ Server side cookies (via response header `SET-COOKIE`) are stored using the assi
 I created this fork for a project of mine as I came across two major problems of the original code:
   1. Cookies sent together with a redirect HTTP response (e.g. 303) were ignored
   2. Cookies using flags instead of keyword arguments ('HttpOnly' instead of 'HttpOnly=true' were not correctly parsed)
+
 Both problems are fixed in this fork.
 
 This fork provides a few more options ('followRedirect', 'maxRedirects' and 'client' for a custom HttpClient) and has a slightly changed API usage (see below) to clean up library code.
