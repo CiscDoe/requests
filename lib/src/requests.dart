@@ -57,6 +57,7 @@ class HTTPException implements Exception {
 }
 
 class Requests {
+
   const Requests();
 
   static final Event onError = Event();
@@ -66,7 +67,7 @@ class Requests {
   static const String HTTP_METHOD_DELETE = "delete";
   static const String HTTP_METHOD_POST = "post";
   static const String HTTP_METHOD_HEAD = "head";
-  static const int DEFAULT_TIMEOUT_SECONDS = 10;
+  static const RequestOptions DEFAULT_REQUEST_OPTIONS = RequestOptions();
 
   static const RequestBodyEncoding DEFAULT_BODY_ENCODING = RequestBodyEncoding.FormURLEncoded;
 
@@ -78,7 +79,11 @@ class Requests {
       if (Common.equalsIgnoreCase(key, 'set-cookie')) {
         String cookie = responseHeaders[key];
         cookie.split(",").forEach((String one) {
-          cookie.split(";").map((x) => x.trim().split("=")).where((x) => x.length == 2).where((x) => !_cookiesKeysToIgnore.contains(x[0])).forEach((x) => cookies[x[0]] = x[1]);
+          var c = one.split("=");
+          if (c.length < 2) return;  // not a valid key-value pair
+          if (c[0].contains(";")) return; // not a cookie name
+          if (_cookiesKeysToIgnore.contains(c[0].trim())) return;  // ignored
+          cookies[c[0]] = c[1].split(";")[0].trim();
         });
         break;
       }
@@ -127,16 +132,17 @@ class Requests {
     return "${uri.host}:${uri.port}";
   }
 
-  static Future<Response> _handleHttpResponse(String hostname, http.Response rawResponse, bool persistCookies) async {
+  static Future<Response> _handleHttpResponse(String hostname, http.StreamedResponse streamedResponse, bool persistCookies) async {
     if (persistCookies) {
-      var responseCookies = _extractResponseCookies(rawResponse.headers);
+      var responseCookies = _extractResponseCookies(streamedResponse.headers);
       if (responseCookies.isNotEmpty) {
         var storedCookies = await getStoredCookies(hostname);
         storedCookies.addAll(responseCookies);
         await setStoredCookies(hostname, storedCookies);
       }
     }
-    var response = Response(rawResponse);
+
+    var response = Response(await http.Response.fromStream(streamedResponse));
 
     if (response.hasError) {
       var errorEvent = {"response": response};
@@ -146,41 +152,32 @@ class Requests {
     return response;
   }
 
-  static Future<Response> head(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) {
-    return _httpRequest(HTTP_METHOD_HEAD, url, bodyEncoding: bodyEncoding, headers: headers, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies, verify: verify);
+  static Future<Response> head(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, http.Client client, options = DEFAULT_REQUEST_OPTIONS}) {
+    return _httpRequest(HTTP_METHOD_HEAD, url, bodyEncoding: bodyEncoding, headers: headers, client: client, options: options);
   }
 
-  static Future<Response> get(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) {
-    return _httpRequest(HTTP_METHOD_GET, url, bodyEncoding: bodyEncoding, headers: headers, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies, verify: verify);
+  static Future<Response> get(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, http.Client client, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) {
+    return _httpRequest(HTTP_METHOD_GET, url, bodyEncoding: bodyEncoding, headers: headers, client: client, options: options);
   }
 
-  static Future<Response> patch(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) {
-    return _httpRequest(HTTP_METHOD_PATCH, url, bodyEncoding: bodyEncoding, headers: headers, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies, verify: verify);
+  static Future<Response> patch(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, http.Client client, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) {
+    return _httpRequest(HTTP_METHOD_PATCH, url, bodyEncoding: bodyEncoding, headers: headers, client: client, options: options);
   }
 
-  static Future<Response> delete(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) {
-    return _httpRequest(HTTP_METHOD_DELETE, url, bodyEncoding: bodyEncoding, headers: headers, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies, verify: verify);
+  static Future<Response> delete(String url, {headers, bodyEncoding = DEFAULT_BODY_ENCODING, http.Client client, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) {
+    return _httpRequest(HTTP_METHOD_DELETE, url, bodyEncoding: bodyEncoding, headers: headers, client: client, options: options);
   }
 
-  static Future<Response> post(String url, {json, body, bodyEncoding = DEFAULT_BODY_ENCODING, headers, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) {
-    return _httpRequest(HTTP_METHOD_POST, url, bodyEncoding: bodyEncoding, json: json, body: body, headers: headers, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies, verify: verify);
+  static Future<Response> post(String url, {json, body, bodyEncoding = DEFAULT_BODY_ENCODING, headers, http.Client client, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) {
+    return _httpRequest(HTTP_METHOD_POST, url, bodyEncoding: bodyEncoding, json: json, body: body, headers: headers, client: client, options: options);
   }
 
-  static Future<Response> put(String url, {json, body, bodyEncoding = DEFAULT_BODY_ENCODING, headers, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) {
-    return _httpRequest(HTTP_METHOD_PUT, url, bodyEncoding: bodyEncoding, json: json, body: body, headers: headers, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies, verify: verify);
+  static Future<Response> put(String url, {json, body, bodyEncoding = DEFAULT_BODY_ENCODING, headers, http.Client client, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) {
+    return _httpRequest(HTTP_METHOD_PUT, url, bodyEncoding: bodyEncoding, json: json, body: body, headers: headers, client: client, options: options);
   }
 
-  static Future<Response> _httpRequest(String method, String url, {json, body, bodyEncoding = DEFAULT_BODY_ENCODING, headers, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS, persistCookies = true, verify = true}) async {
-    http.Client client;
-    if (!verify) {
-      // Ignore SSL errors
-      var ioClient = HttpClient();
-      ioClient.badCertificateCallback = (_, __, ___) => true;
-      client = io_client.IOClient(ioClient);
-    } else {
-      // The default client validates SSL certificates and fail if invalid
-      client = http.Client();
-    }
+  static Future<Response> _httpRequest(String method, String url, {json, body, bodyEncoding = DEFAULT_BODY_ENCODING, headers, http.Client client, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) async {
+    client = _createHttpClient(client, options.verifySSL);
 
     var uri = Uri.parse(url);
 
@@ -225,32 +222,63 @@ class Requests {
       }
     }
 
-    method = method.toLowerCase();
-    Future future;
-    switch (method) {
-      case HTTP_METHOD_GET:
-        future = client.get(uri, headers: headers);
-        break;
-      case HTTP_METHOD_PUT:
-        future = client.put(uri, body: requestBody, headers: headers);
-        break;
-      case HTTP_METHOD_DELETE:
-        future = client.delete(uri, headers: headers);
-        break;
-      case HTTP_METHOD_POST:
-        future = client.post(uri, body: requestBody, headers: headers);
-        break;
-      case HTTP_METHOD_HEAD:
-        future = client.head(uri, headers: headers);
-        break;
-      case HTTP_METHOD_PATCH:
-        future = client.patch(uri, body: requestBody, headers: headers);
-        break;
-      default:
-        throw Exception('unsupported http method "$method"');
+    method = method.toUpperCase();
+    var request = http.Request(method, uri);
+    if (method == HTTP_METHOD_POST.toUpperCase() || method == HTTP_METHOD_PUT.toUpperCase()) {
+      request.body = requestBody;
+    }
+    request.headers.addAll(headers);
+    request.followRedirects = false;
+    var future = client.send(request);
+
+    var rawResponse = await future.timeout(Duration(seconds: options.timeoutSeconds));
+    var response = await _handleHttpResponse(hostname, rawResponse, options.persistCookies);
+    if (rawResponse.isRedirect && options.followRedirects) {
+      response = await _handleRedirect(request, rawResponse, bodyEncoding: bodyEncoding, json: json, body: body, headers: headers, client: client, options: options);
+    }
+    return response;
+  }
+
+  static http.Client _createHttpClient(http.Client client, verify) {
+    if (client == null) {
+      if (!verify) {
+        // Ignore SSL errors
+        var ioClient = HttpClient();
+        ioClient.badCertificateCallback = (_, __, ___) => true;
+        client = io_client.IOClient(ioClient);
+      } else {
+        // The default client validates SSL certificates and fail if invalid
+        client = http.Client();
+      }
+    }
+    return client;
+  }
+
+  static Future<Response> _handleRedirect(http.Request request, http.StreamedResponse sourceResponse, {body, json, bodyEncoding, http.Client client, headers, RequestOptions options = DEFAULT_REQUEST_OPTIONS}) async {
+    var resp;
+    if (sourceResponse.statusCode == 308 || sourceResponse.statusCode == 307) {  // re-send original request to new location
+      resp = await _httpRequest(request.method, sourceResponse.headers["location"], body: body, json: json, bodyEncoding: bodyEncoding, client: client, headers: headers, options: options);
+    } else {  // send GET request
+      resp = await _httpRequest(HTTP_METHOD_GET, sourceResponse.headers["location"], body: body, json: json, bodyEncoding: bodyEncoding, client: client, headers: headers, options: options);
     }
 
-    var response = await future.timeout(Duration(seconds: timeoutSeconds));
-    return await _handleHttpResponse(hostname, response, persistCookies);
+    return resp;
   }
 }
+
+class RequestOptions {
+  final bool followRedirects;
+  final int maxRedirects;
+  final bool verifySSL;
+  final int timeoutSeconds;
+  final bool persistCookies;
+
+  const RequestOptions({this.followRedirects = true,
+                        this.maxRedirects = 5,
+                        this.verifySSL = true,
+                        this.timeoutSeconds = 10,
+                        this.persistCookies = true
+  });
+}
+// shorthand:
+RequestOptions O({followRedirects = true, maxRedirects = 5, verifySSL = true, timeoutSeconds = 10, persistCookies = true}) => RequestOptions(followRedirects: followRedirects, maxRedirects: maxRedirects, verifySSL: verifySSL, timeoutSeconds: timeoutSeconds, persistCookies: persistCookies);
